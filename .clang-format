@@ -1,0 +1,3 @@
+ContinuationIndentWidth: 2
+AlignAfterOpenBracket: DontAlign
+AlignOperands: DontAlign
