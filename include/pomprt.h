@@ -8,6 +8,7 @@
 #ifndef INCLUDE_POMPRT_H
 #define INCLUDE_POMPRT_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -25,8 +26,11 @@ void pomprt_destroy(pomprt_t);
 
 /** Input functions */
 
-const char *pomprt_read(pomprt_t prompt);
-const char *pomprt_read_from(pomprt_t prompt, FILE *input, FILE *output);
+const char *pomprt_read(pomprt_t *);
+const char *pomprt_read_from(pomprt_t *, FILE *input, FILE *output);
+
+bool pomprt_eof(pomprt_t *);       /**< Check EOF */
+bool pomprt_interrupt(pomprt_t *); /**< Check Ctrl+C interrupt */
 
 /** ANSI escape parsing */
 
@@ -52,7 +56,7 @@ pomprt_ansi_t pomprt_reader_next(pomprt_reader_t *reader);
 /** Editor callback API */
 
 enum pomprt_event_kind {
-  POMPRT_INSERT,     /**< Inserts a character and moves the cursor. */
+  POMPRT_INSERT = 0, /**< Inserts a character and moves the cursor. */
   POMPRT_ENTER,      /**< Enter key. Submits the input. */
   POMPRT_BACKSPACE,  /**< Backspace key. Deletes character below the cursor. */
   POMPRT_TAB,        /**< Tab key. Indents the input or triggers completion. */
@@ -87,6 +91,12 @@ const pomprt_editor_t pomprt_default_editor = {NULL, pomprt_next_event_emacs};
 
 /** Implementation details. Subject to change! */
 
+enum pomprt_state {
+  POMPRT_STATE_READING = 0, /**< Default state */
+  POMPRT_STATE_INTERRUPTED, /**< Interrupted by Ctrl+C */
+  POMPRT_STATE_EOF,         /**< EOF reached */
+};
+
 typedef struct {
   size_t len;
   size_t capacity;
@@ -94,9 +104,12 @@ typedef struct {
 } pomprt_buffer_t;
 
 struct pomprt {
+  size_t prompt_len;
   const char *prompt;
   pomprt_editor_t editor;
+
   pomprt_buffer_t buffer; /**< Input buffer. Modified every read. */
+  enum pomprt_state state;
 };
 
 #endif // INCLUDE_POMPRT_H
