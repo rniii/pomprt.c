@@ -147,76 +147,60 @@ pomprt_ansi_t pomprt_reader_next(pomprt_reader_t *reader) {
 }
 
 pomprt_event_t pomprt_next_event_emacs(void *_, pomprt_reader_t *reader) {
+  static const uint8_t events[128] = {
+    // ctrl chars 0x00..0x1f, 0x7f
+    ['?' ^ 0x40] = POMPRT_BACKSPACE,
+    ['A' ^ 0x40] = POMPRT_HOME,
+    ['B' ^ 0x40] = POMPRT_LEFT,
+    ['C' ^ 0x40] = POMPRT_INTERRUPT,
+    ['D' ^ 0x40] = POMPRT_EOF,
+    ['E' ^ 0x40] = POMPRT_END,
+    ['F' ^ 0x40] = POMPRT_RIGHT,
+    ['H' ^ 0x40] = POMPRT_BACKSPACE,
+    ['I' ^ 0x40] = POMPRT_TAB,
+    ['L' ^ 0x40] = POMPRT_CLEAR,
+    ['M' ^ 0x40] = POMPRT_ENTER,
+    ['\\' ^ 0x40] = POMPRT_ABORT,
+    // csi 0x40..0x7e
+    ['A'] = POMPRT_UP,
+    ['B'] = POMPRT_DOWN,
+    ['C'] = POMPRT_RIGHT,
+    ['D'] = POMPRT_LEFT,
+    ['F'] = POMPRT_END,
+    ['H'] = POMPRT_HOME,
+  };
+
   for (;;) {
     pomprt_ansi_t ansi = pomprt_reader_next(reader);
-    if (ansi.type == ANSI_CHAR)
-      return (pomprt_event_t){POMPRT_INSERT, ansi.data.str};
-    if (ansi.type == ANSI_ESC && ansi.data.byte == '\r')
-      return (pomprt_event_t){POMPRT_INSERT, "\n"};
-
     enum pomprt_event_kind kind;
-    if (ansi.type == ANSI_CTRL) {
-      // clang-format off
-      switch (ansi.data.byte ^ 0x40) {
-      case 'M':
-        kind = POMPRT_ENTER;      break;
-      case '?':
-      case 'H':
-        kind = POMPRT_BACKSPACE;  break;
-      case 'I':
-        kind = POMPRT_TAB;        break;
-      case 'B':
-        kind = POMPRT_LEFT;       break;
-      case 'F':
-        kind = POMPRT_RIGHT;      break;
-      case 'A':
-        kind = POMPRT_HOME;       break;
-      case 'E':
-        kind = POMPRT_END;        break;
-      case 'C':
-        kind = POMPRT_INTERRUPT;  break;
-      case 'D':
-        kind = POMPRT_EOF;        break;
-      case '\\':
-        kind = POMPRT_ABORT;      break;
-      case 'L':
-        kind = POMPRT_CLEAR;      break;
-      default:
-        continue;
-      }
-      // clang-format on
-    } else if (ansi.type == ANSI_CSI) {
-      if (strlen(ansi.data.str) == 1) {
-        // clang-format off
-        switch (ansi.data.str[0]) {
-        case 'D':
-          kind = POMPRT_LEFT;   break;
-        case 'C':
-          kind = POMPRT_RIGHT;  break;
-        case 'H':
-          kind = POMPRT_HOME;   break;
-        case 'F':
-          kind = POMPRT_END;    break;
-        case 'A':
-          kind = POMPRT_UP;     break;
-        case 'B':
-          kind = POMPRT_DOWN;   break;
-        }
-        // clang-format on
-      } else if (strcmp(ansi.data.str, "1;5D") == 0 ||
-        strcmp(ansi.data.str, "1;3D") == 0) {
-        kind = POMPRT_LEFT_WORD;
-      } else if (strcmp(ansi.data.str, "1;5C") == 0 ||
-        strcmp(ansi.data.str, "1;3D") == 0) {
-        kind = POMPRT_RIGHT_WORD;
-      } else {
-        continue;
-      }
-    } else {
-      continue;
-    }
 
-    return (pomprt_event_t){kind, 0};
+    switch (ansi.type) {
+    case ANSI_CHAR:
+      return (pomprt_event_t){POMPRT_INSERT, ansi.data.str};
+    case ANSI_ESC:
+      if (ansi.data.byte == '\r')
+        return (pomprt_event_t){POMPRT_INSERT, "\n"};
+      break;
+    case ANSI_CTRL:
+      if ((kind = events[(size_t)ansi.data.byte]))
+        return (pomprt_event_t){kind, 0};
+      break;
+    case ANSI_CSI:
+      if (strlen(ansi.data.str) == 1) {
+        if ((kind = events[(size_t)ansi.data.str[0]]))
+          return (pomprt_event_t){kind, 0};
+        break;
+      }
+      if (strcmp(ansi.data.str, "1;5D") == 0 ||
+        strcmp(ansi.data.str, "1;3D") == 0) {
+        return (pomprt_event_t){POMPRT_LEFT_WORD, 0};
+      }
+      if (strcmp(ansi.data.str, "1;5C") == 0 ||
+        strcmp(ansi.data.str, "1;3D") == 0) {
+        return (pomprt_event_t){POMPRT_RIGHT_WORD, 0};
+      }
+      break;
+    }
   }
 }
 
