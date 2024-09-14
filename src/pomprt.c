@@ -60,8 +60,8 @@ static void pomprt__term_init(void) {
   if (init)
     return;
 
-  pomprt__conin = (HANDLE)_get_osfhandle(fileno(fopen("CONIN$", "w")));
-  pomprt__conout = (HANDLE)_get_osfhandle(fileno(fopen("CONOUT$", "w")));
+  pomprt__conin = (HANDLE)_get_osfhandle(fileno(fopen("CONIN$", "r+")));
+  pomprt__conout = (HANDLE)_get_osfhandle(fileno(fopen("CONOUT$", "r+")));
   if (GetConsoleMode(pomprt__conin, &pomprt__conin_mode) &&
     GetConsoleMode(pomprt__conout, &pomprt__conout_mode))
     pomprt__tty_ok = true;
