@@ -87,8 +87,6 @@ struct pomprt_editor {
 
 pomprt_event_t pomprt_next_event_emacs(void *self, pomprt_reader_t *reader);
 
-const pomprt_editor_t pomprt_default_editor = {NULL, pomprt_next_event_emacs};
-
 /** Implementation details. Subject to change! */
 
 enum pomprt_state {

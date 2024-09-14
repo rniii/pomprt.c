@@ -5,7 +5,7 @@ project('pomrpt', 'c',
 
 pomprt_inc = include_directories('include')
 
-pomprt_lib = library('pomprt', 'src/pomprt.c',
+pomprt_lib = static_library('pomprt', 'src/pomprt.c',
   include_directories: pomprt_inc,
   install: true)
 

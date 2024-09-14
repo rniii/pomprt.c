@@ -13,10 +13,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #ifdef __unix__
 #include <termios.h>
+#include <unistd.h> // no unistd on windows
 
 static struct termios pomprt__tty;
 static bool pomprt__tty_ok = false;
@@ -45,6 +45,7 @@ static void pomprt__term_restore(void) {
   tcsetattr(STDIN_FILENO, TCSAFLUSH, &pomprt__tty);
 }
 #elif defined(_WIN32)
+#include <io.h> // what??
 #include <windows.h>
 
 static DWORD pomprt__conin_mode;
@@ -58,8 +59,8 @@ static void pomprt__term_init(void) {
   if (init)
     return;
 
-  pomprt__conin = _get_osfhandle(fileno(fopen("CONIN$", "rw")));
-  pomprt__conout = _get_osfhandle(fileno(fopen("CONOUT$", "rw")));
+  pomprt__conin = (HANDLE)_get_osfhandle(fileno(fopen("CONIN$", "rw")));
+  pomprt__conout = (HANDLE)_get_osfhandle(fileno(fopen("CONOUT$", "rw")));
   if (GetConsoleMode(pomprt__conin, &pomprt__conin_mode) &&
     GetConsoleMode(pomprt__conout, &pomprt__conout_mode))
     pomprt__tty_ok = true;
@@ -261,7 +262,7 @@ pomprt_t pomprt_new(const char *prompt) {
   return (pomprt_t){
     .prompt_len = strlen(prompt),
     .prompt = prompt,
-    .editor = pomprt_default_editor,
+    .editor = {NULL, pomprt_next_event_emacs},
     .buffer = pomprt__create_buf(128),
     .state = POMPRT_STATE_READING,
   };
@@ -285,9 +286,9 @@ const char *pomprt__read_dumb(pomprt_t *p) {
 }
 
 const char *pomprt_read(pomprt_t *p) {
-  if (!isatty(STDIN_FILENO))
+  if (!isatty(fileno(stdin)))
     return pomprt__read_dumb(p);
-  return pomprt_read_from(p, stdin, isatty(STDOUT_FILENO) ? stdout : stderr);
+  return pomprt_read_from(p, stdin, isatty(fileno(stdout)) ? stdout : stderr);
 }
 
 static inline pomprt_event_t pomprt__next_event(
@@ -339,7 +340,7 @@ const char *pomprt_read_from(pomprt_t *p, FILE *input, FILE *output) {
     case POMPRT_BACKSPACE:
       if (cursor > 0) {
         size_t i = 0;
-        while (p->buffer.bytes[cursor - ++i] < 0)
+        while (p->buffer.bytes[cursor - ++i] <= -0x40)
           ;
         pomprt__remove_buf(&p->buffer, cursor -= i, i);
         pomprt__redraw(p, output);
