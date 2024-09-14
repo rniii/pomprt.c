@@ -44,9 +44,51 @@ static void pomprt__term_restore(void) {
     return;
   tcsetattr(STDIN_FILENO, TCSAFLUSH, &pomprt__tty);
 }
-#else
-// TODO: winapi. may god have mercy
-#error "Unsupported platform!"
+#elif defined(_WIN32)
+#include <windows.h>
+
+static DWORD pomprt__conin_mode;
+static DWORD pomprt__conout_mode;
+static HANDLE pomprt__conin;
+static HANDLE pomprt__conout;
+static bool pomprt__tty_ok = false;
+
+static void pomprt__term_init(void) {
+  static bool init = false;
+  if (init)
+    return;
+
+  pomprt__conin = _get_osfhandle(fileno(fopen("CONIN$", "rw")));
+  pomprt__conout = _get_osfhandle(fileno(fopen("CONOUT$", "rw")));
+  if (GetConsoleMode(pomprt__conin, &pomprt__conin_mode) &&
+    GetConsoleMode(pomprt__conout, &pomprt__conout_mode))
+    pomprt__tty_ok = true;
+
+  init = true;
+}
+
+static void pomprt__term_raw(void) {
+  if (!pomprt__tty_ok)
+    return;
+
+  DWORD conin = pomprt__conin_mode;
+  conin &= ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
+  conin |= ENABLE_VIRTUAL_TERMINAL_INPUT;
+
+  DWORD conout = pomprt__conout_mode;
+  conout |= ENABLE_VIRTUAL_TERMINAL_PROCESSING | ENABLE_PROCESSED_OUTPUT;
+
+  SetConsoleMode(pomprt__conin, conin);
+  SetConsoleMode(pomprt__conout, conout);
+}
+
+static void pomprt__term_restore(void) {
+  if (!pomprt__tty_ok)
+    return;
+
+  SetConsoleMode(pomprt__conin, pomprt__conout_mode);
+  SetConsoleMode(pomprt__conout, pomprt__conout_mode);
+}
 #endif
 
 static inline pomprt_buffer_t pomprt__create_buf(size_t capacity) {
