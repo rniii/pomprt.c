@@ -259,6 +259,13 @@ static void pomprt__redraw(pomprt_t *p, FILE *output) {
   fwrite(p->buffer.bytes, 1, p->buffer.len, output);
 }
 
+static size_t pomprt__count_chars(const char *buf, size_t end) {
+  size_t i = 0;
+  for (; end--; buf++)
+    i += *buf > -0x40;
+  return i;
+}
+
 const char *pomprt_read_from(pomprt_t *p, FILE *input, FILE *output) {
   pomprt__term_raw();
 
@@ -307,7 +314,8 @@ const char *pomprt_read_from(pomprt_t *p, FILE *input, FILE *output) {
       goto end;
     }
 
-    fprintf(output, "\r\x1b[%ziC", cursor + prompt_len);
+    fprintf(output, "\r\x1b[%ziC",
+      pomprt__count_chars(p->buffer.bytes, cursor) + prompt_len);
     fflush(output);
   };
 
