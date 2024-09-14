@@ -15,6 +15,7 @@
 #include <string.h>
 
 #ifdef __unix__
+#include <signal.h>
 #include <termios.h>
 #include <unistd.h> // no unistd on windows
 
@@ -59,8 +60,8 @@ static void pomprt__term_init(void) {
   if (init)
     return;
 
-  pomprt__conin = (HANDLE)_get_osfhandle(fileno(fopen("CONIN$", "rw")));
-  pomprt__conout = (HANDLE)_get_osfhandle(fileno(fopen("CONOUT$", "rw")));
+  pomprt__conin = (HANDLE)_get_osfhandle(fileno(fopen("CONIN$", "w")));
+  pomprt__conout = (HANDLE)_get_osfhandle(fileno(fopen("CONOUT$", "w")));
   if (GetConsoleMode(pomprt__conin, &pomprt__conin_mode) &&
     GetConsoleMode(pomprt__conout, &pomprt__conout_mode))
     pomprt__tty_ok = true;
@@ -168,10 +169,13 @@ pomprt_ansi_t pomprt_reader_next(pomprt_reader_t *reader) {
     byte = fgetc(reader->input);
     if (byte == '[') {
       pomprt__clear_buf(&reader->buf);
-      while ((byte = fgetc(reader->input)) < 0x40) {
-        if (byte <= 0x1f || byte > 0x7e) // invalid, ignore it
+      for (;;) {
+        byte = fgetc(reader->input);
+        if (byte <= 0x1f || byte >= 0x7f) // invalid, ignore it
           continue;
         pomprt__pushb_buf(&reader->buf, byte);
+        if (byte >= 0x40)
+          break;
       }
       pomprt__pushb_buf(&reader->buf, 0);
 
@@ -212,6 +216,7 @@ pomprt_event_t pomprt_next_event_emacs(void *_, pomprt_reader_t *reader) {
     ['I' ^ 0x40] = POMPRT_TAB,
     ['L' ^ 0x40] = POMPRT_CLEAR,
     ['M' ^ 0x40] = POMPRT_ENTER,
+    ['Z' ^ 0x40] = POMPRT_SUSPEND,
     ['\\' ^ 0x40] = POMPRT_ABORT,
     // csi 0x40..0x7e
     ['A'] = POMPRT_UP,
@@ -346,15 +351,51 @@ const char *pomprt_read_from(pomprt_t *p, FILE *input, FILE *output) {
         pomprt__redraw(p, output);
       }
       break;
+    case POMPRT_TAB:
+      break;
+    case POMPRT_LEFT:
+      if (cursor == 0)
+        continue;
+      while (p->buffer.bytes[--cursor] <= -0x40)
+        ;
+      break;
+    case POMPRT_RIGHT:
+      if (cursor >= p->buffer.len)
+        continue;
+      while (p->buffer.bytes[++cursor] <= -0x40)
+        ;
+      break;
+    case POMPRT_HOME:
+      cursor = 0;
+      break;
+    case POMPRT_END:
+      cursor = p->buffer.len;
+      break;
     case POMPRT_INTERRUPT:
       p->state = POMPRT_STATE_INTERRUPTED;
       goto end;
     case POMPRT_EOF:
       p->state = POMPRT_STATE_EOF;
       goto end;
-    default:
-      p->state = POMPRT_STATE_READING;
-      goto end;
+    case POMPRT_SUSPEND:
+#ifdef __unix__
+      kill(getpid(), SIGTSTP);
+      pomprt__redraw(p, output);
+#endif
+      break;
+    case POMPRT_ABORT:
+      pomprt__term_restore();
+      abort();
+    case POMPRT_UP:
+      break;
+    case POMPRT_DOWN:
+      break;
+    case POMPRT_CLEAR:
+      break;
+    case POMPRT_LEFT_WORD:
+      break;
+    case POMPRT_RIGHT_WORD:
+      break;
     }
 
     fprintf(output, "\r\x1b[%ziC",
