@@ -4,9 +4,6 @@ A tiny and extensible readline implementation written from scratch. C99 rewrite 
 
 [Rust version]: https://github.com/rniii/pomprt
 
-- UTF-8 support with high performance
-- Easily bindable API with automatic allocation
-
 ```c
 const char *input;
 pomprt_t prompt = pomprt_new(">> ");
@@ -17,9 +14,27 @@ while ((input = pomprt_read(&prompt))) {
 pomprt_destroy(prompt);
 ```
 
+## Why not [linenoise]?
+
+This project is in similar scope to linenoise, providing some advantages:
+
+- Unlike linenoise, it has UTF-8 support
+- Multiline prompts are properly rendered with line wraps
+- Windows terminals are also supported
+- It's easier to use in FFI
+- All in standard C99, and just 400 lines of code!
+
+[linenoise]: https://github.com/antirez/linenoise
+
+However, linenoise has likely been tested in more terminals. If you find problems with specific
+keybinds with pomprt though, please [open an issue!](github.com/rniii/pomprt.c/issues/new)
+
 ## Building
 
 <!-- maid-tasks -->
+
+If you'd like to use C, meson and clang are recommended, but just about any compiler will do— all
+you need is to compile `src/pomprt.c` and use `include/pomprt.h`.
 
 ### setup
 

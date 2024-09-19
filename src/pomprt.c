@@ -131,7 +131,19 @@ static void pomprt__pushb_buf(pomprt_buffer_t *buf, char b) {
   buf->bytes[buf->len++] = b;
 }
 
+static void pomprt__null_term(pomprt_buffer_t *buf) {
+  pomprt__reserve_buf(buf, 1);
+  buf->bytes[buf->len] = 0;
+}
+
 static inline void pomprt__clear_buf(pomprt_buffer_t *buf) { buf->len = 0; }
+
+static inline void pomprt__shrink_buf(pomprt_buffer_t *buf, size_t min) {
+  if (buf->capacity < min || buf->len >= min)
+    return;
+  buf->bytes = realloc(buf->bytes, min);
+  buf->capacity = min;
+}
 
 struct pomprt_reader {
   FILE *input;
@@ -318,6 +330,7 @@ const char *pomprt_read_from(pomprt_t *p, FILE *input, FILE *output) {
   pomprt__term_raw();
 
   pomprt__clear_buf(&p->buffer);
+  pomprt__shrink_buf(&p->buffer, 1 << 16); // limit buffer size
 
   size_t cursor = 0;
   size_t prompt_len = strlen(p->prompt);
@@ -404,8 +417,7 @@ const char *pomprt_read_from(pomprt_t *p, FILE *input, FILE *output) {
   };
 
 end:
-  pomprt__pushb_buf(&p->buffer, 0);
-
+  pomprt__null_term(&p->buffer);
   pomprt__term_restore();
 
   if (p->state != POMPRT_STATE_READING)
