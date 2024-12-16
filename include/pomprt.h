@@ -8,6 +8,7 @@
 #ifndef INCLUDE_POMPRT_H
 #define INCLUDE_POMPRT_H
 
+#include "buffer.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -83,9 +84,11 @@ typedef struct {
 struct pomprt_editor {
   void *self; /**< Data passed to callbacks */
   pomprt_event_t (*next_event)(void *self, pomprt_reader_t *reader);
+  bool (*is_keyword)(void *self, const char *c);
 };
 
 pomprt_event_t pomprt_next_event_emacs(void *self, pomprt_reader_t *reader);
+bool pomprt_is_keyword(void *self, const char *c);
 
 /** Implementation details. Subject to change! */
 
@@ -95,18 +98,12 @@ enum pomprt_state {
   POMPRT_STATE_EOF,         /**< EOF reached */
 };
 
-typedef struct {
-  size_t len;
-  size_t capacity;
-  char *bytes;
-} pomprt_buffer_t;
-
 struct pomprt {
   size_t prompt_len;
   const char *prompt;
   pomprt_editor_t editor;
 
-  pomprt_buffer_t buffer; /**< Input buffer. Modified every read. */
+  buffer_t buffer; /**< Input buffer. Modified every read. */
   enum pomprt_state state;
 };
 

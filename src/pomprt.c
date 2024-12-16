@@ -7,6 +7,7 @@
 
 #define _DEFAULT_SOURCE
 
+#define BUFFER_IMPLEMENTATION
 #include "pomprt.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -15,143 +16,20 @@
 #include <string.h>
 
 #ifdef __unix__
-#include <signal.h>
-#include <termios.h>
-#include <unistd.h> // no unistd on windows
-
-static struct termios pomprt__tty;
-static bool pomprt__tty_ok = false;
-
-static void pomprt__term_init(void) {
-  static bool init = false;
-  if (init)
-    return;
-  if (tcgetattr(STDIN_FILENO, &pomprt__tty) != -1)
-    pomprt__tty_ok = true;
-  init = true;
-}
-
-static void pomprt__term_raw(void) {
-  if (!pomprt__tty_ok)
-    return;
-  struct termios raw = pomprt__tty;
-  cfmakeraw(&raw);
-  raw.c_oflag |= OPOST;
-  tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-}
-
-static void pomprt__term_restore(void) {
-  if (!pomprt__tty_ok)
-    return;
-  tcsetattr(STDIN_FILENO, TCSAFLUSH, &pomprt__tty);
-}
+#include "platform_unix.h"
 #elif defined(_WIN32)
-#include <io.h> // what??
-#include <windows.h>
-
-static DWORD pomprt__conin_mode;
-static DWORD pomprt__conout_mode;
-static HANDLE pomprt__conin;
-static HANDLE pomprt__conout;
-static bool pomprt__tty_ok = false;
-
-static void pomprt__term_init(void) {
-  static bool init = false;
-  if (init)
-    return;
-
-  pomprt__conin = (HANDLE)_get_osfhandle(fileno(fopen("CONIN$", "r+")));
-  pomprt__conout = (HANDLE)_get_osfhandle(fileno(fopen("CONOUT$", "r+")));
-  if (GetConsoleMode(pomprt__conin, &pomprt__conin_mode) &&
-    GetConsoleMode(pomprt__conout, &pomprt__conout_mode))
-    pomprt__tty_ok = true;
-
-  init = true;
-}
-
-static void pomprt__term_raw(void) {
-  if (!pomprt__tty_ok)
-    return;
-
-  DWORD conin = pomprt__conin_mode;
-  conin &= ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
-  conin |= ENABLE_VIRTUAL_TERMINAL_INPUT;
-
-  DWORD conout = pomprt__conout_mode;
-  conout |= ENABLE_VIRTUAL_TERMINAL_PROCESSING | ENABLE_PROCESSED_OUTPUT;
-
-  SetConsoleMode(pomprt__conin, conin);
-  SetConsoleMode(pomprt__conout, conout);
-}
-
-static void pomprt__term_restore(void) {
-  if (!pomprt__tty_ok)
-    return;
-
-  SetConsoleMode(pomprt__conin, pomprt__conout_mode);
-  SetConsoleMode(pomprt__conout, pomprt__conout_mode);
-}
+#include "platform_nt.h"
+#else
+#error "Unsupported platform"
 #endif
-
-static inline pomprt_buffer_t pomprt__create_buf(size_t capacity) {
-  char *bytes = malloc(capacity);
-  return (pomprt_buffer_t){0, capacity, bytes};
-}
-
-static inline void pomprt__destroy_buf(pomprt_buffer_t buf) { free(buf.bytes); }
-
-static void pomprt__reserve_buf(pomprt_buffer_t *buf, size_t additional) {
-  size_t required = buf->len + additional;
-  if (required <= buf->capacity)
-    return;
-
-  size_t new_cap;
-  new_cap = buf->capacity * 2;
-  new_cap = required > new_cap ? required : new_cap;
-
-  buf->bytes = realloc(buf->bytes, new_cap);
-  buf->capacity = new_cap;
-}
-
-static void pomprt__insert_buf(
-  pomprt_buffer_t *buf, size_t idx, const char *value, size_t sz) {
-  pomprt__reserve_buf(buf, sz);
-  memmove(&buf->bytes[idx + sz], &buf->bytes[idx], buf->len - idx);
-  memcpy(&buf->bytes[idx], value, sz);
-  buf->len += sz;
-}
-
-static void pomprt__remove_buf(pomprt_buffer_t *buf, size_t idx, size_t sz) {
-  buf->len -= sz;
-  memcpy(&buf->bytes[idx], &buf->bytes[idx + sz], sz);
-}
-
-static void pomprt__pushb_buf(pomprt_buffer_t *buf, char b) {
-  pomprt__reserve_buf(buf, 1);
-  buf->bytes[buf->len++] = b;
-}
-
-static void pomprt__null_term(pomprt_buffer_t *buf) {
-  pomprt__reserve_buf(buf, 1);
-  buf->bytes[buf->len] = 0;
-}
-
-static inline void pomprt__clear_buf(pomprt_buffer_t *buf) { buf->len = 0; }
-
-static inline void pomprt__shrink_buf(pomprt_buffer_t *buf, size_t min) {
-  if (buf->capacity < min || buf->len >= min)
-    return;
-  buf->bytes = realloc(buf->bytes, min);
-  buf->capacity = min;
-}
 
 struct pomprt_reader {
   FILE *input;
-  pomprt_buffer_t buf;
+  buffer_t buf;
 };
 
 static pomprt_reader_t pomprt__create_reader(FILE *input) {
-  return (pomprt_reader_t){input, pomprt__create_buf(8)};
+  return (pomprt_reader_t){input, buffer_create(8)};
 }
 
 pomprt_ansi_t pomprt_reader_next(pomprt_reader_t *reader) {
@@ -180,16 +58,16 @@ pomprt_ansi_t pomprt_reader_next(pomprt_reader_t *reader) {
   if (byte == 0x1b) {
     byte = fgetc(reader->input);
     if (byte == '[') {
-      pomprt__clear_buf(&reader->buf);
+      buffer_clear(&reader->buf);
       for (;;) {
         byte = fgetc(reader->input);
         if (byte <= 0x1f || byte >= 0x7f) // invalid, ignore it
           continue;
-        pomprt__pushb_buf(&reader->buf, byte);
+        buffer_push(&reader->buf, byte);
         if (byte >= 0x40)
           break;
       }
-      pomprt__pushb_buf(&reader->buf, 0);
+      buffer_push(&reader->buf, 0);
 
       return (pomprt_ansi_t){ANSI_CSI, {.str = reader->buf.bytes}};
     } else {
@@ -199,16 +77,16 @@ pomprt_ansi_t pomprt_reader_next(pomprt_reader_t *reader) {
     return (pomprt_ansi_t){ANSI_CTRL, {.byte = byte}};
   } else {
     // we have enough capacity for a utf-8 char, don't reserve
-    pomprt__clear_buf(&reader->buf);
+    buffer_clear(&reader->buf);
     for (uint32_t state = 0;; byte = fgetc(reader->input)) {
       state = utf8s[state + utf8d[byte]];
-      reader->buf.bytes[reader->buf.len++] = byte;
+      reader->buf.bytes[reader->buf.length++] = byte;
       if (state == 0)
         break;
       if (state == 12)
         return (pomprt_ansi_t){ANSI_CHAR, {.str = "\uFFFD"}};
     }
-    reader->buf.bytes[reader->buf.len++] = 0;
+    reader->buf.bytes[reader->buf.length++] = 0;
 
     return (pomprt_ansi_t){ANSI_CHAR, {.str = reader->buf.bytes}};
   }
@@ -273,50 +151,65 @@ pomprt_event_t pomprt_next_event_emacs(void *_, pomprt_reader_t *reader) {
   }
 }
 
+bool pomprt_is_keyword(void *_, const char *c) {
+  return (*c < 0) || (*c >= '0' && *c <= '9') || (*c >= 'A' && *c <= 'Z') ||
+    (*c >= 'a' && *c <= 'z');
+}
+
+static bool pomprt__is_term = false;
+
 pomprt_t pomprt_new(const char *prompt) {
-  pomprt__term_init();
+  static bool init = false;
+  if (!init) {
+    pomprt__is_term = pomprt__term_init();
+  }
+  init = true;
 
   return (pomprt_t){
     .prompt_len = strlen(prompt),
     .prompt = prompt,
-    .editor = {NULL, pomprt_next_event_emacs},
-    .buffer = pomprt__create_buf(128),
+    .editor = {NULL, pomprt_next_event_emacs, pomprt_is_keyword},
+    .buffer = buffer_create(128),
     .state = POMPRT_STATE_READING,
   };
 }
 
-void pomprt_destroy(pomprt_t p) { pomprt__destroy_buf(p.buffer); }
+void pomprt_destroy(pomprt_t p) { buffer_destroy(p.buffer); }
 
 const char *pomprt__read_dumb(pomprt_t *p) {
-  pomprt__clear_buf(&p->buffer);
+  buffer_clear(&p->buffer);
   int byte;
   while ((byte = fgetc(stdin)) != '\n') {
     if (byte == EOF) {
       p->state = POMPRT_STATE_EOF;
       return NULL;
     }
-    pomprt__pushb_buf(&p->buffer, byte);
+    buffer_push(&p->buffer, byte);
   }
-  pomprt__pushb_buf(&p->buffer, 0);
+  buffer_push(&p->buffer, 0);
   p->state = POMPRT_STATE_READING;
   return p->buffer.bytes;
 }
 
 const char *pomprt_read(pomprt_t *p) {
-  if (!isatty(fileno(stdin)))
+  if (!pomprt__is_term || !isatty(fileno(stdin)))
     return pomprt__read_dumb(p);
   return pomprt_read_from(p, stdin, isatty(fileno(stdout)) ? stdout : stderr);
 }
 
 static inline pomprt_event_t pomprt__next_event(
-  pomprt_editor_t editor, pomprt_reader_t *reader) {
-  return editor.next_event(editor.self, reader);
+  pomprt_t *p, pomprt_reader_t *reader) {
+  return p->editor.next_event(p->editor.self, reader);
+}
+
+static inline bool pomprt__is_keyword(pomprt_t *p, size_t cursor) {
+  return p->editor.is_keyword(p->editor.self, &p->buffer.bytes[cursor]);
 }
 
 static void pomprt__redraw(pomprt_t *p, FILE *output) {
   fwrite("\r\x1b[J", 1, 4, output);
   fwrite(p->prompt, 1, p->prompt_len, output);
-  fwrite(p->buffer.bytes, 1, p->buffer.len, output);
+  fwrite(p->buffer.bytes, 1, p->buffer.length, output);
 }
 
 static size_t pomprt__count_chars(const char *buf, size_t end) {
@@ -327,10 +220,11 @@ static size_t pomprt__count_chars(const char *buf, size_t end) {
 }
 
 const char *pomprt_read_from(pomprt_t *p, FILE *input, FILE *output) {
-  pomprt__term_raw();
+  if (pomprt__is_term)
+    pomprt__term_raw();
 
-  pomprt__clear_buf(&p->buffer);
-  pomprt__shrink_buf(&p->buffer, 1 << 16); // limit buffer size
+  buffer_clear(&p->buffer);
+  buffer_shrink(&p->buffer, 1 << 16); // limit buffer size
 
   size_t cursor = 0;
   size_t prompt_len = strlen(p->prompt);
@@ -339,12 +233,12 @@ const char *pomprt_read_from(pomprt_t *p, FILE *input, FILE *output) {
   pomprt__redraw(p, output);
 
   for (;;) {
-    pomprt_event_t event = pomprt__next_event(p->editor, &reader);
+    pomprt_event_t event = pomprt__next_event(p, &reader);
 
     switch (event.type) {
     case POMPRT_INSERT: {
       size_t chr_len = strlen(event.str);
-      pomprt__insert_buf(&p->buffer, cursor, event.str, chr_len);
+      buffer_insert(&p->buffer, cursor, event.str, chr_len);
       pomprt__redraw(p, output);
       cursor += chr_len;
       break;
@@ -360,7 +254,7 @@ const char *pomprt_read_from(pomprt_t *p, FILE *input, FILE *output) {
         size_t i = 0;
         while (p->buffer.bytes[cursor - ++i] <= -0x40)
           ;
-        pomprt__remove_buf(&p->buffer, cursor -= i, i);
+        buffer_remove(&p->buffer, cursor -= i, i);
         pomprt__redraw(p, output);
       }
       break;
@@ -373,7 +267,7 @@ const char *pomprt_read_from(pomprt_t *p, FILE *input, FILE *output) {
         ;
       break;
     case POMPRT_RIGHT:
-      if (cursor >= p->buffer.len)
+      if (cursor >= p->buffer.length)
         continue;
       while (p->buffer.bytes[++cursor] <= -0x40)
         ;
@@ -382,7 +276,7 @@ const char *pomprt_read_from(pomprt_t *p, FILE *input, FILE *output) {
       cursor = 0;
       break;
     case POMPRT_END:
-      cursor = p->buffer.len;
+      cursor = p->buffer.length;
       break;
     case POMPRT_INTERRUPT:
       p->state = POMPRT_STATE_INTERRUPTED;
@@ -406,8 +300,12 @@ const char *pomprt_read_from(pomprt_t *p, FILE *input, FILE *output) {
     case POMPRT_CLEAR:
       break;
     case POMPRT_LEFT_WORD:
+      while (cursor > 0 && pomprt__is_keyword(p, --cursor))
+        ;
       break;
     case POMPRT_RIGHT_WORD:
+      while (cursor < p->buffer.length && pomprt__is_keyword(p, ++cursor))
+        ;
       break;
     }
 
@@ -417,8 +315,8 @@ const char *pomprt_read_from(pomprt_t *p, FILE *input, FILE *output) {
   };
 
 end:
-  pomprt__null_term(&p->buffer);
-  pomprt__term_restore();
+  if (pomprt__is_term)
+    pomprt__term_restore();
 
   if (p->state != POMPRT_STATE_READING)
     return NULL;
