@@ -19,7 +19,7 @@ typedef struct pomprt_editor pomprt_editor_t;
 /** Creation functions */
 
 pomprt_t pomprt_new(const char *prompt);
-pomprt_t pomprt_with(pomprt_editor_t, const char *prompt);
+pomprt_t pomprt_new2(size_t prompt_len, const char *prompt);
 
 /** Cleanup */
 
@@ -81,14 +81,16 @@ typedef struct {
   char *str; /**< Character insterted by POMPRT_INSERT, NULL otherwise. */
 } pomprt_event_t;
 
-struct pomprt_editor {
-  void *self; /**< Data passed to callbacks */
-  pomprt_event_t (*next_event)(void *self, pomprt_reader_t *reader);
-  bool (*is_keyword)(void *self, const char *c);
-};
+pomprt_event_t pomprt_default_next_event(pomprt_reader_t *reader);
+bool pomprt_default_is_keyword(const char *c);
 
-pomprt_event_t pomprt_next_event_emacs(void *self, pomprt_reader_t *reader);
-bool pomprt_is_keyword(void *self, const char *c);
+#ifndef pomprt_next_event
+#define pomprt_next_event pomprt_default_next_event
+#endif
+
+#ifndef pomprt_is_keyword
+#define pomprt_is_keyword pomprt_default_is_keyword
+#endif
 
 /** Implementation details. Subject to change! */
 
@@ -101,7 +103,6 @@ enum pomprt_state {
 struct pomprt {
   size_t prompt_len;
   const char *prompt;
-  pomprt_editor_t editor;
 
   buffer_t buffer; /**< Input buffer. Modified every read. */
   enum pomprt_state state;

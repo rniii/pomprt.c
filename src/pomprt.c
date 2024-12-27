@@ -92,7 +92,7 @@ pomprt_ansi_t pomprt_reader_next(pomprt_reader_t *reader) {
   }
 }
 
-pomprt_event_t pomprt_next_event_emacs(void *_, pomprt_reader_t *reader) {
+pomprt_event_t pomprt_default_next_event(pomprt_reader_t *reader) {
   static const uint8_t events[128] = {
     // ctrl chars 0x00..0x1f, 0x7f
     ['?' ^ 0x40] = POMPRT_BACKSPACE,
@@ -151,7 +151,7 @@ pomprt_event_t pomprt_next_event_emacs(void *_, pomprt_reader_t *reader) {
   }
 }
 
-bool pomprt_is_keyword(void *_, const char *c) {
+bool pomprt_default_is_keyword(const char *c) {
   return (*c < 0) || (*c >= '0' && *c <= '9') || (*c >= 'A' && *c <= 'Z') ||
     (*c >= 'a' && *c <= 'z');
 }
@@ -159,6 +159,10 @@ bool pomprt_is_keyword(void *_, const char *c) {
 static bool pomprt__is_term = false;
 
 pomprt_t pomprt_new(const char *prompt) {
+  return pomprt_new2(strlen(prompt), prompt);
+}
+
+pomprt_t pomprt_new2(size_t prompt_len, const char *prompt) {
   static bool init = false;
   if (!init) {
     pomprt__is_term = pomprt__term_init();
@@ -166,9 +170,8 @@ pomprt_t pomprt_new(const char *prompt) {
   init = true;
 
   return (pomprt_t){
-    .prompt_len = strlen(prompt),
+    .prompt_len = prompt_len,
     .prompt = prompt,
-    .editor = {NULL, pomprt_next_event_emacs, pomprt_is_keyword},
     .buffer = buffer_create(128),
     .state = POMPRT_STATE_READING,
   };
@@ -195,15 +198,6 @@ const char *pomprt_read(pomprt_t *p) {
   if (!pomprt__is_term || !isatty(fileno(stdin)))
     return pomprt__read_dumb(p);
   return pomprt_read_from(p, stdin, isatty(fileno(stdout)) ? stdout : stderr);
-}
-
-static inline pomprt_event_t pomprt__next_event(
-  pomprt_t *p, pomprt_reader_t *reader) {
-  return p->editor.next_event(p->editor.self, reader);
-}
-
-static inline bool pomprt__is_keyword(pomprt_t *p, size_t cursor) {
-  return p->editor.is_keyword(p->editor.self, &p->buffer.bytes[cursor]);
 }
 
 static void pomprt__redraw(pomprt_t *p, FILE *output) {
@@ -233,7 +227,7 @@ const char *pomprt_read_from(pomprt_t *p, FILE *input, FILE *output) {
   pomprt__redraw(p, output);
 
   for (;;) {
-    pomprt_event_t event = pomprt__next_event(p, &reader);
+    pomprt_event_t event = pomprt_next_event(&reader);
 
     switch (event.type) {
     case POMPRT_INSERT: {
@@ -300,11 +294,12 @@ const char *pomprt_read_from(pomprt_t *p, FILE *input, FILE *output) {
     case POMPRT_CLEAR:
       break;
     case POMPRT_LEFT_WORD:
-      while (cursor > 0 && pomprt__is_keyword(p, --cursor))
+      while (cursor > 0 && pomprt_is_keyword(&p->buffer.bytes[--cursor]))
         ;
       break;
     case POMPRT_RIGHT_WORD:
-      while (cursor < p->buffer.length && pomprt__is_keyword(p, ++cursor))
+      while (cursor < p->buffer.length &&
+        pomprt_is_keyword(&p->buffer.bytes[++cursor]))
         ;
       break;
     }
