@@ -1,2 +1,5 @@
 build/
 .ccls-cache/
+
+.zig-cache/
+zig-out/
